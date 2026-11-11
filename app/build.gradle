@@ -11,8 +11,8 @@ android {
         minSdk 21
         targetSdk 34
         // sobe sozinho a cada build no GitHub Actions
-        versionCode (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
-        versionName '0.1.' + (System.getenv('GITHUB_RUN_NUMBER') ?: '1')
+        versionCode = Integer.parseInt(System.getenv('GITHUB_RUN_NUMBER') ?: '1')
+        versionName = '0.1.' + (System.getenv('GITHUB_RUN_NUMBER') ?: '1')
     }
 
     // Assinatura FIXA: a mesma chave em todo build, entao da pra atualizar sem desinstalar
