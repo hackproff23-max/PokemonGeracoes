@@ -1,0 +1,42 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'org.gamesia.pkg'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'org.gamesia.pkg'
+        minSdk 21
+        targetSdk 34
+        // sobe sozinho a cada build no GitHub Actions
+        versionCode (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+        versionName '0.1.' + (System.getenv('GITHUB_RUN_NUMBER') ?: '1')
+    }
+
+    // Assinatura FIXA: a mesma chave em todo build, entao da pra atualizar sem desinstalar
+    signingConfigs {
+        gamesia {
+            storeFile file('gamesia.jks')
+            storePassword 'gamesia123'
+            keyAlias 'gamesia'
+            keyPassword 'gamesia123'
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.gamesia
+            minifyEnabled false
+        }
+        debug {
+            signingConfig signingConfigs.gamesia
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
