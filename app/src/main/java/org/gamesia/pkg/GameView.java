@@ -3,8 +3,11 @@ package org.gamesia.pkg;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.RadialGradient;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -138,7 +141,10 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Run
     public void surfaceChanged(SurfaceHolder h, int format, int w, int hgt) {
         screenW = w;
         screenH = hgt;
-        tile = Math.max(16, Math.round(hgt / 9f));
+        tile = Math.max(16, Math.round(hgt / 8.5f));
+        haze = new LinearGradient(0, 0, 0, hgt * 0.45f, 0xDD9ED8F2, 0x009ED8F2, Shader.TileMode.CLAMP);
+        vig = new RadialGradient(w / 2f, hgt / 2f, Math.max(w, hgt) * 0.75f,
+                new int[]{0x00000000, 0x00000000, 0x66000000}, new float[]{0f, 0.6f, 1f}, Shader.TileMode.CLAMP);
         stickR = hgt * 0.17f;
         btnR = hgt * 0.09f;
         defBaseX = stickR * 1.7f;
@@ -228,6 +234,11 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Run
             walkTime = 0f;
         }
 
+        camX += (px - camX) * Math.min(1f, dt * 8f);
+        camY += (py - camY) * Math.min(1f, dt * 8f);
+        camX = clamp(camX, 5f, MW - 5f);
+        camY = clamp(camY, 3.5f, MH - 3f);
+
         if (aTap) {
             aTap = false;
             interact();
@@ -263,24 +274,76 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Run
         bannerT = 2.5f;
     }
 
-    // ------------------------------------------------------------ desenho
+    // ------------------------------------------------------------ desenho (mundo 3D + sprites 2D)
+
+    private static final float K = 8f, TILT = 0.8f;
+    private float camX = 24.5f, camY = 18.8f, cxS, cyS;
+    private final Paint fx = new Paint();
+    private LinearGradient haze;
+    private RadialGradient vig;
+
+    // escala de perspectiva (perto = maior, longe = menor)
+    private float sc(float dy) {
+        return K / (K - 0.45f * dy);
+    }
+
+    // y de tela de uma linha do chao
+    private float gy(float dy) {
+        return cyS + dy * tile * TILT * sc(dy);
+    }
 
     private void drawGame(Canvas c) {
-        c.drawColor(Color.BLACK);
-        float camX = clamp(px * tile - screenW / 2f, 0f, Math.max(0f, MW * tile - screenW));
-        float camY = clamp(py * tile - screenH / 2f, 0f, Math.max(0f, MH * tile - screenH));
-        int x0 = Math.max(0, (int) (camX / tile));
-        int y0 = Math.max(0, (int) (camY / tile));
-        int x1 = Math.min(MW - 1, (int) ((camX + screenW) / tile));
-        int y1 = Math.min(MH - 1, (int) ((camY + screenH) / tile));
+        c.drawColor(0xFF2E5E3A);
+        cxS = screenW / 2f;
+        cyS = screenH * 0.58f;
+        int yA = Math.max(0, (int) Math.floor(camY) - 9);
+        int yB = Math.min(MH - 1, (int) Math.floor(camY) + 5);
         long time = System.currentTimeMillis();
+        int pr = (int) Math.floor(py + 0.3f);
 
-        for (int y = y0; y <= y1; y++) {
-            for (int x = x0; x <= x1; x++) {
-                drawTile(c, map[y][x], x, y, x * tile - camX, y * tile - camY, time);
+        // 1) chao em perspectiva
+        for (int y = yA; y <= yB; y++) {
+            float top = gy(y - camY), bot = gy(y + 1 - camY);
+            if (bot < 0 || top > screenH) continue;
+            float tw = tile * sc(y + 0.5f - camY);
+            int xA = Math.max(0, (int) Math.floor(camX - cxS / tw) - 1);
+            int xB = Math.min(MW - 1, (int) Math.ceil(camX + (screenW - cxS) / tw) + 1);
+            for (int x = xA; x <= xB; x++) {
+                float l = cxS + (x - camX) * tw;
+                drawGround(c, map[y][x], x, y, l, top, l + tw, bot, time);
             }
         }
-        drawPlayer(c, px * tile - camX, py * tile - camY);
+
+        // 2) objetos em pe (sprites 2D) + jogador, de tras para frente
+        for (int y = yA; y <= yB; y++) {
+            float top = gy(y - camY), bot = gy(y + 1 - camY);
+            if (!(bot < -tile || top > screenH + tile * 2f)) {
+                float tw = tile * sc(y + 0.5f - camY);
+                int xA = Math.max(0, (int) Math.floor(camX - cxS / tw) - 2);
+                int xB = Math.min(MW - 1, (int) Math.ceil(camX + (screenW - cxS) / tw) + 2);
+                for (int x = xA; x <= xB; x++) {
+                    int t = map[y][x];
+                    if (t == TREE || t == TALL || t == FLOWER) {
+                        float l = cxS + (x - camX) * tw;
+                        drawObject(c, t, x, y, l, top, l + tw, bot);
+                    }
+                }
+            }
+            if (y == pr) drawPlayerAt(c, pr);
+        }
+
+        // 3) neblina no horizonte + vinheta
+        fx.setStyle(Paint.Style.FILL);
+        if (haze != null) {
+            fx.setShader(haze);
+            c.drawRect(0, 0, screenW, screenH * 0.45f, fx);
+        }
+        if (vig != null) {
+            fx.setShader(vig);
+            c.drawRect(0, 0, screenW, screenH, fx);
+        }
+        fx.setShader(null);
+
         drawHud(c);
     }
 
@@ -294,65 +357,107 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Run
         c.drawRect(x, y, x + w, y + h, p);
     }
 
-    private void drawTile(Canvas c, int t, int tx, int ty, float sx, float sy, long time) {
-        float u = tile / 16f;
+    private void drawGround(Canvas c, int t, int tx, int ty, float l, float tp, float r, float b, long time) {
+        float ux = (r - l) / 16f, uy = (b - tp) / 16f;
         int h = (tx * 73856093) ^ (ty * 19349663);
         int v = (h >>> 3) & 3;
-        float s = tile + 1f;
+        float w = r - l + 1f, hh = b - tp + 1f;
         switch (t) {
-            case TALL: {
-                fill(c, sx, sy, s, s, 0xFF3F9E4A);
-                for (int i = 0; i < 4; i++) {
-                    float bx = sx + (2 + i * 4 + ((h >>> (i + 2)) & 1)) * u;
-                    float by = sy + (4 + (i % 2) * 6) * u;
-                    fill(c, bx, by, 1.5f * u, 6 * u, 0xFF2C7C38);
-                    fill(c, bx + 1.5f * u, by + 1.5f * u, 1.2f * u, 4.5f * u, 0xFF6BCB6E);
-                }
+            case TALL:
+                fill(c, l, tp, w, hh, 0xFF3F9E4A);
                 break;
-            }
-            case TREE: {
-                fill(c, sx, sy, s, s, 0xFF5DB85A);
-                fill(c, sx + 6 * u, sy + 10 * u, 4 * u, 6 * u, 0xFF6B4423);
-                p.setStyle(Paint.Style.FILL);
-                p.setColor(0xFF1F6B33);
-                c.drawCircle(sx + 8 * u, sy + 7 * u, 7.5f * u, p);
-                p.setColor(0xFF2F8F45);
-                c.drawCircle(sx + 7 * u, sy + 6 * u, 5.5f * u, p);
-                p.setColor(0xFF58B864);
-                c.drawCircle(sx + 5.5f * u, sy + 4.5f * u, 2.2f * u, p);
+            case TREE:
+                fill(c, l, tp, w, hh, 0xFF4C9A4B);
                 break;
-            }
             case WATER: {
-                fill(c, sx, sy, s, s, 0xFF3A8EDB);
-                float off = (float) Math.sin((time / 400.0) + tx * 0.7 + ty * 0.4) * 2f * u;
-                fill(c, sx + (3 * u) + off, sy + 5 * u, 5 * u, 1.2f * u, 0xFF7CC1F2);
-                fill(c, sx + (8 * u) - off, sy + 11 * u, 5 * u, 1.2f * u, 0xFF7CC1F2);
+                fill(c, l, tp, w, hh, 0xFF3A8EDB);
+                float off = (float) Math.sin((time / 400.0) + tx * 0.7 + ty * 0.4) * 2f * ux;
+                fill(c, l + 3 * ux + off, tp + 5 * uy, 5 * ux, 1.2f * uy + 0.5f, 0xFF7CC1F2);
+                fill(c, l + 8 * ux - off, tp + 11 * uy, 5 * ux, 1.2f * uy + 0.5f, 0xFF7CC1F2);
                 break;
             }
-            case PATH: {
-                fill(c, sx, sy, s, s, 0xFFD9BC82);
-                fill(c, sx + (3 + v * 3) * u, sy + 4 * u, 1.6f * u, 1.6f * u, 0xFFBB9A62);
-                fill(c, sx + (10 - v) * u, sy + 10 * u, 1.6f * u, 1.6f * u, 0xFFE8D2A4);
+            case PATH:
+                fill(c, l, tp, w, hh, 0xFFD9BC82);
+                fill(c, l + (3 + v * 3) * ux, tp + 4 * uy, 1.6f * ux, 1.6f * uy + 0.5f, 0xFFBB9A62);
+                fill(c, l + (10 - v) * ux, tp + 10 * uy, 1.6f * ux, 1.6f * uy + 0.5f, 0xFFE8D2A4);
                 break;
-            }
-            case FLOWER: {
-                fill(c, sx, sy, s, s, 0xFF5DB85A);
-                int col = (v < 2) ? 0xFFFFE066 : 0xFFFF7BAC;
-                fill(c, sx + 4 * u, sy + 6 * u, 2 * u, 2 * u, col);
-                fill(c, sx + 10 * u, sy + 10 * u, 2 * u, 2 * u, 0xFFFFFFFF);
+            default:
+                fill(c, l, tp, w, hh, v == 0 ? 0xFF5AB257 : 0xFF5DB85A);
+                if (v == 1) fill(c, l + 5 * ux, tp + 9 * uy, 1.5f * ux, 3 * uy, 0xFF4A9E4A);
+                if (v == 2) fill(c, l + 11 * ux, tp + 4 * uy, 1.5f * ux, 3 * uy, 0xFF4A9E4A);
                 break;
-            }
-            default: {
-                fill(c, sx, sy, s, s, v == 0 ? 0xFF5AB257 : 0xFF5DB85A);
-                if (v == 1) fill(c, sx + 5 * u, sy + 9 * u, 1.5f * u, 3 * u, 0xFF4A9E4A);
-                if (v == 2) fill(c, sx + 11 * u, sy + 4 * u, 1.5f * u, 3 * u, 0xFF4A9E4A);
-                break;
-            }
         }
     }
 
-    private void drawPlayer(Canvas c, float cx, float cy) {
-        float u = tile / 16f;
+    private void drawObject(Canvas c, int t, int tx, int ty, float l, float tp, float r, float b) {
+        float ux = (r - l) / 16f;
+        int h = (tx * 73856093) ^ (ty * 19349663);
+        int v = (h >>> 3) & 3;
+        switch (t) {
+            case TREE:
+                drawTree(c, (l + r) / 2f, tp + (b - tp) * 0.7f, ux);
+                break;
+            case TALL:
+                for (int i = 0; i < 6; i++) {
+                    float bx = l + (1f + i * 2.6f + ((h >>> (i + 2)) & 1)) * ux;
+                    float base = tp + (b - tp) * (0.45f + 0.4f * (i % 2));
+                    fill(c, bx, base - 8 * ux, 1.6f * ux, 8 * ux, 0xFF2C7C38);
+                    fill(c, bx + 1.6f * ux, base - 6.5f * ux, 1.2f * ux, 6 * ux, 0xFF6BCB6E);
+                }
+                break;
+            case FLOWER: {
+                int col = (v < 2) ? 0xFFFFE066 : 0xFFFF7BAC;
+                float x1 = l + 4 * ux, y1 = tp + (b - tp) * 0.45f;
+                fill(c, x1 + 0.6f * ux, y1 + 2 * ux, 0.8f * ux, 3 * ux, 0xFF2E7D32);
+                fill(c, x1, y1, 2 * ux, 2 * ux, col);
+                float x2 = l + 10 * ux, y2 = tp + (b - tp) * 0.75f;
+                fill(c, x2 + 0.6f * ux, y2 + 2 * ux, 0.8f * ux, 3 * ux, 0xFF2E7D32);
+                fill(c, x2, y2, 2 * ux, 2 * ux, 0xFFFFFFFF);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    private void drawTree(Canvas c, float bx, float by, float u) {
+        p.setStyle(Paint.Style.FILL);
+        // sombra no chao
+        p.setColor(0x33000000);
+        rf.set(bx - 7 * u, by - 2 * u, bx + 11 * u, by + 3 * u);
+        c.drawOval(rf, p);
+        // tronco
+        fill(c, bx - 2 * u, by - 10 * u, 4 * u, 10 * u, 0xFF6B4423);
+        fill(c, bx - 2 * u, by - 10 * u, 1.2f * u, 10 * u, 0xFF8A5A30);
+        // copa
+        p.setColor(0xFF1F6B33);
+        c.drawCircle(bx, by - 20 * u, 9 * u, p);
+        p.setColor(0xFF267A3B);
+        c.drawCircle(bx + 3 * u, by - 16 * u, 6 * u, p);
+        p.setColor(0xFF2F8F45);
+        c.drawCircle(bx - 1.5f * u, by - 22 * u, 7 * u, p);
+        p.setColor(0xFF58B864);
+        c.drawCircle(bx - 3.5f * u, by - 25 * u, 2.8f * u, p);
+    }
+
+    private void drawPlayerAt(Canvas c, int pr) {
+        float dy = py + 0.3f - camY;
+        float s = sc(dy);
+        float fpx = cxS + (px - camX) * tile * s;
+        float fpy = gy(dy);
+        float u = tile * s / 14f;
+        drawPlayer(c, fpx, fpy - 6f * u, u);
+
+        // grama alta na frente das pernas
+        int ptx = (int) Math.floor(px);
+        if (ptx >= 0 && ptx < MW && pr >= 0 && pr < MH && map[pr][ptx] == TALL) {
+            float tw = tile * sc(pr + 0.5f - camY);
+            float l = cxS + (ptx - camX) * tw;
+            drawObject(c, TALL, ptx, pr, l, gy(pr - camY), l + tw, gy(pr + 1 - camY));
+        }
+    }
+
+    private void drawPlayer(Canvas c, float cx, float cy, float u) {
         boolean moving = walkTime > 0f;
         float swing = moving ? (float) Math.sin(walkTime) : 0f;
         float bob = moving ? Math.abs((float) Math.sin(walkTime)) * 1.2f * u : 0f;
