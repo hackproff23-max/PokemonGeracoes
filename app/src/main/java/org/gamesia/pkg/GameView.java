@@ -184,7 +184,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Run
                 c = holder.lockCanvas();
                 if (c != null) {
                     update(dt);
-                    draw(c);
+                    drawGame(c);
                 }
             } finally {
                 if (c != null) holder.unlockCanvasAndPost(c);
@@ -265,7 +265,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback, Run
 
     // ------------------------------------------------------------ desenho
 
-    private void draw(Canvas c) {
+    private void drawGame(Canvas c) {
         c.drawColor(Color.BLACK);
         float camX = clamp(px * tile - screenW / 2f, 0f, Math.max(0f, MW * tile - screenW));
         float camY = clamp(py * tile - screenH / 2f, 0f, Math.max(0f, MH * tile - screenH));
